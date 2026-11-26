@@ -1,0 +1,297 @@
+ROLE
+You are a Senior UI/UX Developer with 20 years of experience in service-ticketing,
+campus and facility-management products. Users are tired, busy students who just want
+a broken tap or fan fixed, wardens who are overloaded, and maintenance staff working
+from phones. Every decision must reduce effort, make progress visible and build trust
+that complaints never get lost.
+
+PROJECT: "Fix It Fast: Hostel Maintenance Complaints"
+Problem: complaints about plumbing, electrical and cleaning issues get lost, and
+residents cannot see progress. Build a ticketing app where residents file complaints
+with room, category, priority and photo; wardens assign tickets to maintenance staff;
+staff post status updates on a ticket timeline; residents are notified, confirm the
+resolution and rate the service; and a warden dashboard highlights pending and overdue
+tickets.
+
+STEP 0: SETUP
+Clone and read the README of https://github.com/viettranx/3dviz-pro-max.git.
+Use 3dviz-pro-max to build the 3D scene. Follow its real API. Do not invent functions.
+State any assumption.
+
+1. CREATIVE CONCEPT: "The Hostel Quarter"
+A small explorable 3D low-poly hostel campus at twilight is the home screen and the
+navigation metaphor. Warm lit windows show active tickets. Calm, friendly, never
+childish. The UI layer on top is monochrome liquid glass so it never fights the scene.
+
+Buildings (each maps to a feature):
+- Hostel Block: residents file a new complaint (room, category, priority, photo)
+- Notice Board Tower: "My tickets" list and the ticket timeline
+- Warden's Office: warden dashboard (pending, overdue, assignments)
+- Workshop: maintenance staff queue and status updates
+- Utility Yard: category zones (plumbing tap, electrical bulb, cleaning broom)
+- Clock Tower: overdue and SLA timers (it glows or chimes softly when tickets are overdue)
+- Feedback Gazebo: confirm resolution and rate the service
+- Main Gate: login and role selection (Resident / Warden / Staff)
+
+Live data in the scene: each hostel window lights amber for open tickets and dims when
+resolved; the Clock Tower shows the overdue count. Click any building to open its glass
+panel.
+
+Creatures (at least 3, subtle and looping): campus cats wandering paths, fireflies near
+the active building, a small maintenance drone or birds circling the Clock Tower. All
+respect prefers-reduced-motion.
+
+2. BACKGROUND: "Twilight Valley" 3D wallpaper
+Layered, depth-rich, calm and never busy. Back to front: sky gradient with faint stars
+and a soft low moon (Obsidian) or pale sunrise haze (Frost); slow low-contrast aurora;
+3 to 4 misty mountain silhouette layers; mid hills with tiny lantern lights; drifting
+volumetric fog; sparse fireflies away from text areas; soft foreground vignette.
+Palette: monochrome base (deep indigo/charcoal for Obsidian, soft white/grey for Frost)
+plus one muted amber accent. No bright or saturated colours.
+Motion: per-layer parallax on mouse move, device tilt and dock navigation; when a
+building is selected, the background dims and blurs slightly (depth of field).
+Glass compatibility: keep the area behind panels low in contrast and detail; add an
+adaptive scrim so text stays at 4.5:1 or better over the brightest and darkest parts.
+Fallbacks: prefers-reduced-motion freezes parallax, fog and particles; low-end devices,
+no WebGL or 2D mode use pre-rendered WebP/AVIF wallpapers (16:9 desktop, 9:16 mobile)
+with a plain gradient as the last fallback. Theme toggle cross-fades Frost and Obsidian.
+Reference image prompts (image generation only, then translate to CSS/Three.js):
+ Obsidian: "Serene twilight valley 3D wallpaper, layered misty mountain silhouettes,
+ large soft moon, faint aurora, tiny warm lantern lights, volumetric fog, deep indigo
+ and charcoal monochrome with subtle amber glow, strong depth, calm negative space in
+ the centre, high-quality 3D render. Negative: bright colors, clutter, excessive
+ detail, harsh contrast, text, watermark, people. --ar 16:9 --style raw --stylize 250"
+ Frost: "Serene dawn valley 3D wallpaper, layered soft mountain silhouettes in mist,
+ pale sunrise haze, gentle fog, soft whites and light greys with faint warm glow, ample
+ negative space, smooth 3D render. Negative: bright colors, harsh shadows, clutter, low
+ contrast, text, watermark, people. --ar 16:9 --style raw --stylize 250"
+ (Mobile versions: --ar 9:16.)
+
+3. DESIGN LANGUAGE: LIQUID GLASS (every button, card, input, chip, modal, toast,
+   tooltip, ticket card and timeline item)
+References: https://liquidglassdesign.com/ui ("Stepper design", "Liquid Glass Button",
+"iOS 26 Liquid Glass Buttons", "LB Frosted Glass Card Design", "Notifications").
+Recipe:
+- Translucent fill (white 8-18% light, 6-12% dark) + backdrop-filter: blur(16-28px)
+  saturate(140-180%)
+- 1px gradient border with a top-left specular highlight, plus inset top glow
+- Soft, large, low-opacity shadows only; radii 20-32px, pill controls, no sharp edges
+- Optional SVG displacement filter on large panels for a liquid bend
+- Monochrome Frost (soft whites/greys) and Obsidian (dark charcoal, subtle highlights);
+  desaturated accents for status only
+- Press: scale .97 with spring easing; hover: light sweep
+- Fallbacks: @supports not (backdrop-filter) and prefers-reduced-transparency use solid
+  opaque surfaces. Text on glass always keeps 4.5:1 contrast.
+- Status and priority must never rely on colour alone: always pair colour with an icon
+  and a text label (Open, Assigned, In progress, Resolved, Reopened, Overdue; Low,
+  Medium, High, Urgent).
+
+Toggle style "Frost" (dock, wide switches): minimalist toggle switch, soft
+glassmorphism, frosted glass with subtle shadows, gentle lighting, soft whites and
+greys, ample negative space, serene modern mood. Negative: low contrast, harsh shadows,
+clutter, bright colors, excessive detail, text-heavy elements, sharp edges, watermarks.
+--ar 16:9 --style raw --stylize 250
+Toggle style "Obsidian" (small buttons and switches): sleek mobile toggle, liquid glass
+with frosted and glossy materials, soft ambient light, dark monochrome with subtle
+highlights, depth, sophisticated mood. Negative: low contrast, harsh shadows, clutter,
+bright colors, jagged edges, readability issues, watermarks, excessive detail.
+--ar 1:1 --style raw --stylize 250
+
+4. NAVIGATION: NO NAVBAR. ROLE-AWARE BOTTOM TOGGLE DOCK.
+- Floating glass dock fixed at bottom centre (safe-area aware) with a segmented toggle
+  (icons + short labels; labels collapse to icons on small screens). Segments change by
+  role, 5 max:
+  Resident: Home, New Ticket, My Tickets, Alerts, Profile
+  Warden: Overview, Tickets, Staff, Reports, Settings
+  Maintenance staff: My Jobs, Updates, History
+- One liquid-glass thumb slides behind the active segment with spring easing
+  (~350-450ms), stretching slightly mid-travel like a droplet, then settling
+- role="tablist", arrow-key navigation, visible focus ring, 44px+ targets, aria labels,
+  and a numeric badge on Alerts and Overdue
+- Switching a segment flies the 3D camera to the matching building and slides a glass
+  panel up above the dock
+- The dock shrinks while the user types and returns on scroll or tap
+- Theme (Frost/Obsidian), text size, high contrast, language and notification settings
+  live in a glass Settings sheet opened from a small round glass toggle beside the dock
+
+5. CORE FEATURES AND UI (all liquid glass)
+Resident:
+- New ticket (one question per step): room number (with hostel block), category
+  (Plumbing, Electrical, Cleaning, Other) with large icon chips, priority (Low, Medium,
+  High, Urgent) with a short hint of what each means, description, photo upload (camera
+  or gallery, compressed, multiple photos, preview and remove), review and submit
+- Duplicate check: warn if an open ticket already exists for the same room and category
+- My tickets: glass cards with ID, category icon, priority, status chip, age, assigned
+  staff; filters and search
+- Ticket detail: a vertical TIMELINE with each status update (who, when, note, photo),
+  expected completion time, and a "Nudge warden" action when overdue
+- Notifications: toast plus an Alerts panel for assigned, in progress and resolved
+- Confirm resolution: "Is it fixed?" with Yes, or No (reopen with a reason and photo)
+- Rating: 1 to 5 stars plus an optional comment after confirming
+Warden:
+- Dashboard: summary glass tiles (Pending, In progress, Overdue, Resolved this week,
+  average resolution time, average rating), an Overdue list pinned at the top, charts
+  by category and by hostel block
+- Ticket table or board: filters (status, category, priority, block), sort by age
+- Assign: pick staff by skill and current workload, set due time; reassign; bulk
+  assign
+- Overdue logic: SLA by priority (e.g. Urgent 4h, High 24h, Medium 48h, Low 72h),
+  configurable, with escalation highlight
+Maintenance staff:
+- My jobs: list sorted by priority and due time; open a job, post status updates
+  (Started, Waiting for parts, Resolved) with a note and an optional photo; each update
+  appends to the timeline
+Global states: loading skeletons, empty states ("No tickets, all fixed!"), error and
+offline states (queue a ticket drafted offline and sync later), success toasts, modals
+for confirmations.
+
+6. STATUS FLOW
+Open -> Assigned -> In progress -> (Waiting for parts) -> Resolved (by staff) ->
+Closed (resident confirms) or Reopened (resident rejects). Every transition writes a
+timeline entry and sends a notification.
+
+7. UX PRINCIPLES (non-negotiable)
+- Filing a ticket takes under 60 seconds and 5 taps on mobile
+- Plain, friendly language; the resident always knows the status and the next step
+- Never lose a complaint: autosave drafts, confirm submission with a ticket ID
+- Mobile-first for residents and staff; dense but calm dashboard on desktop for wardens
+- WCAG 2.2 AA: keyboard navigation, screen reader labels, contrast, focus states.
+  Glass effects must never reduce readability.
+- Full 2D non-3D fallback (list and dashboard views only) for low-end devices, no
+  WebGL, or accessibility needs
+- Lazy-load 3D, target 60fps, disable heavy blur on low-end devices
+- Optional languages: English and Hindi (i18n files)
+
+8. TECH
+React/Next.js + TypeScript, Tailwind + CSS variables for glass tokens, Framer Motion
+(or CSS springs) for the dock thumb, 3dviz-pro-max, mock backend with JSON (or
+Supabase/Firebase) for tickets, users, roles and timeline; Web Push or in-app
+notifications; Recharts for dashboard charts; client-side image compression.
+
+9. DATA MODEL (provide the schema)
+User (id, name, role, room, block, skills), Ticket (id, room, block, category,
+priority, description, photos[], status, createdAt, dueAt, assignedTo, rating,
+reopenCount), TimelineEvent (ticketId, actor, status, note, photo, timestamp),
+Notification (userId, ticketId, type, readAt).
+
+10. DELIVERABLES
+1. Short UX rationale (personas: Resident, Warden, Staff; user journeys; key decisions)
+2. Information architecture and screen list per role
+3. Design tokens: glass (blur, opacity, border, shadow), Frost and Obsidian colours,
+   status and priority styles, typography, spacing, radii, motion/spring values
+4. Components: GlassButton, GlassCard, GlassInput, GlassChip, GlassModal, GlassToast,
+   BottomDock, ValleyBackground, TicketCard, Timeline, StatusChip, RatingStars
+5. Working code: background, campus scene, dock, ticket form, ticket timeline, warden
+   dashboard, staff job view
+6. Data schema, seed data and mock API
+7. INSPECT THE RESULT: render the scene, test the dock animation for each role, check
+   glass contrast over bright and dark parts of the background, test click/hover on
+   every building, verify the window lights reflect ticket data, verify creatures
+   animate, run the full flow (file ticket -> assign -> staff update -> resolve ->
+   confirm -> rate), check mobile, reduced-motion and reduced-transparency modes, then
+   list the issues found and fix them.
+11. ANIMATION SYSTEM: "THE COMPLAINT JOURNEY"
+Everything in the product is animated with purpose. Animation must explain what is
+happening (where the complaint is, who has it, what happens next), never decorate.
+
+A. THE TICKET ORB (signature feature)
+Every complaint becomes a small glowing liquid-glass orb (or sealed glass letter) that
+physically travels through the 3D campus along curved paths (CatmullRom curves) with a
+soft light trail. One orb per ticket; its colour and icon show the category (tap,
+bulb, broom) and a ring shows priority.
+
+Journey choreography, tied to the status flow:
+1. SUBMIT: the form card folds into the orb, lifts out of the glass panel, and
+   launches from the Hostel Block window (that window lights amber)
+2. OPEN -> ASSIGNED: the orb flies to the Warden's Office, hovers in a "waiting
+   tray" with a gentle pulse; the warden assigns it, and the orb splits a light
+   thread to the chosen staff member
+3. ASSIGNED -> IN PROGRESS: the orb travels along the path to the Workshop, then to
+   the target room; a small tool animation (wrench, spark or water drop) loops above
+   the room window while work is going on
+4. WAITING FOR PARTS: the orb parks at the Utility Yard with a slow breathing pulse
+   and a small clock icon
+5. RESOLVED: the orb turns bright, flies back to the resident's window and bursts into
+   soft light particles; the window dims to show it is no longer open
+6. CONFIRM + RATE: a ribbon of light carries the orb to the Feedback Gazebo; stars fill
+   in one by one when the resident rates
+7. REOPENED: the orb reverses back along the path in a warm tint to the Warden's Office
+8. OVERDUE: the orb's trail flickers amber and the Clock Tower pulses and chimes
+   softly; the orb stays visible until action is taken
+
+"Track my complaint" button on every ticket: the camera glides to the ticket's current
+location, replays the path already travelled as a fading trail, and highlights where
+it will go next with a dotted path. Dragging the 2D timeline scrubs the orb back and
+forth along the path (timeline and 3D scene stay in sync).
+
+B. TIMELINE ANIMATION (2D glass panel)
+- The vertical line draws itself downward as events are added (stroke-dashoffset)
+- Each new update slides in with a spring and a soft glow, then settles
+- The status chip morphs (shared-element transition) from the old status to the new one
+- A photo attached to an update expands from a thumbnail into a lightbox and back
+- A live "typing / working" shimmer appears on the active step
+
+C. SCREEN AND COMPONENT TRANSITIONS
+- Dock: liquid thumb slides and stretches between segments (350-450ms spring)
+- Panels slide up from the dock with a slight scale and blur-in; they close by
+  collapsing back into the dock segment that opened them
+- Shared-element transitions: a ticket card expands into the ticket detail view and
+  collapses back (layout animations)
+- Form steps: the current question slides out left, the next one slides in from the
+  right; the progress stepper fills with a liquid wave; going back reverses the motion
+- Category and priority chips: press squash (scale .97), selection ripples outward, a
+  check morphs in
+- Photo upload: the image shrinks and flies into a slot, with a circular progress ring
+  around it while compressing and uploading
+- Buttons: light sweep on hover, spring press, a loading spinner that morphs out of
+  the label, a tick that morphs in on success
+- Toasts and notifications: drop in from the top with a soft bounce; the bell icon
+  swings once; the dock badge pops with a spring
+- Lists and dashboards: staggered fade and rise on first load (40-60ms per item);
+  counters count up; charts draw in; the overdue tile breathes gently
+- Skeletons: soft shimmer; empty states: a small looping illustration (e.g. a sleeping
+  cat on the notice board)
+- Rating stars: fill with a pop and sparkle, one by one
+- Theme switch Frost/Obsidian: circular reveal from the toggle with the wallpaper
+  cross-fading
+
+D. CAMPUS AMBIENT ANIMATION (already listed, keep subtle)
+Window lights flicker softly, fog drifts, cats wander, fireflies orbit the active
+building, the Clock Tower hands move, and the drone or birds circle the tower.
+
+E. FIRST-TIME EXPLAINER
+A skippable 20-second animated tour on first launch: a sample complaint orb travels
+Hostel Block -> Warden's Office -> Workshop -> Gazebo while short glass captions appear
+("You report", "Warden assigns", "Staff fixes", "You confirm and rate"). A "How it
+works" replay button lives in the Settings sheet.
+
+F. ANIMATION TOKENS AND RULES
+- Durations: micro 120-200ms, UI 250-450ms, scene travel 1.5-3s per path leg
+- Easing: springs (stiffness ~260, damping ~24) for UI; easeInOutCubic for camera and
+  orb paths; no linear motion, nothing abrupt
+- Animate only transform and opacity where possible; avoid animating blur radius on
+  large areas
+- Never more than 3 simultaneous attention-grabbing animations on screen
+- prefers-reduced-motion: orbs teleport between stops with a quick fade, the timeline
+  appears without sliding, parallax, creatures and fog are static, and the explainer
+  becomes a still step-by-step slideshow
+- Low-end devices or 2D mode: replace the 3D orb journey with a 2D animated progress
+  track (a glass pill that slides across 5 labelled stations: Reported, Assigned, In
+  progress, Resolved, Rated)
+- Sound is optional and off by default (soft chime for overdue and resolved)
+- Every animation must work offline and must not delay actions: users can interrupt or
+  skip any animation without losing input
+
+G. TECH FOR ANIMATION
+Framer Motion for UI and layout animations; GSAP (or Three.js tweens with
+CatmullRomCurve3 and TubeGeometry trails) for 3D orb paths and camera moves; a
+central AnimationController that listens to ticket status events and triggers the
+matching orb leg, timeline entry, window light and notification together, so
+animation always reflects real data. Provide a small dev panel to replay each stage.
+
+ADD TO DELIVERABLES
+- AnimationController, TicketOrb, JourneyPath, TimelineAnimated, and the explainer tour
+- A storyboard (frame-by-frame) of the 8-step complaint journey
+- In the final inspection: verify the orb reaches every stop for every status change,
+  the timeline and 3D scene stay in sync when scrubbing, reduced-motion and 2D
+  fallbacks work, and frame rate stays near 60fps on a mid-range phone
