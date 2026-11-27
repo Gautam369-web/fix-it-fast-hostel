@@ -223,8 +223,6 @@ export const ResidentViews: React.FC<{
                 if (b.id === 'hostel_block') onNavigate('new_ticket', b.id);
                 else if (b.id === 'notice_board') onNavigate('my_tickets', b.id);
                 else if (b.id === 'main_gate') onNavigate('profile', b.id);
-                else if (b.id === 'wardens_office') onSwitchRole('warden');
-                else if (b.id === 'workshop') onSwitchRole('staff');
                 else if (b.id === 'feedback_gazebo') onNavigate('my_tickets', b.id);
                 else onNavigate('home', b.id);
               }}
@@ -585,7 +583,7 @@ export const ResidentViews: React.FC<{
 
   // --- ALERTS ---
   if (activeSegment === 'alerts') {
-    const mine = notifications.filter((n) => n.userId === user.id || n.userId === 'res-aarav');
+    const mine = notifications.filter((n) => n.userId === user.id);
     return (
       <GlassCard className="p-4 sm:p-5 space-y-3">
         <div className="flex items-center justify-between">
@@ -629,37 +627,34 @@ export const ResidentViews: React.FC<{
     );
   }
 
-  // --- PROFILE / MAIN GATE ROLE SWITCHER ---
+  // --- PROFILE / MAIN GATE SIGN OUT ---
   return (
     <GlassCard className="p-5 space-y-4">
-      <div className="flex items-center gap-3">
-        <div className="w-12 h-12 rounded-2xl bg-[var(--accent-amber-soft)] text-[var(--accent-amber)] font-bold flex items-center justify-center">
-          {user.avatarInitials}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-2xl bg-[var(--accent-amber-soft)] text-[var(--accent-amber)] font-bold flex items-center justify-center">
+            {user.avatarInitials}
+          </div>
+          <div>
+            <h2 className="font-display text-lg font-bold text-[var(--text-primary)]">{user.name}</h2>
+            <p className="text-xs text-[var(--text-secondary)]">
+              {t(lang, `role.${user.role}`)} · {user.block} · Room {user.room}
+            </p>
+          </div>
         </div>
-        <div>
-          <h2 className="font-display text-lg font-bold text-[var(--text-primary)]">{user.name}</h2>
-          <p className="text-xs text-[var(--text-secondary)]">
-            {t(lang, `role.${user.role}`)} · {user.block} · Room {user.room}
-          </p>
-        </div>
+        <GlassButton variant="amber" onClick={() => onSwitchRole(user.role)}>
+          Switch Account / Logout
+        </GlassButton>
       </div>
 
-      <div className="pt-3 border-t border-[var(--glass-border-side)]/40 space-y-2.5">
+      <div className="pt-3 border-t border-[var(--glass-border-side)]/40 space-y-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)] flex items-center gap-1.5">
           <UserCheck className="w-3.5 h-3.5 text-[var(--accent-amber)]" />
-          <span>Main Gate · Switch Persona to Test Full Flow</span>
+          <span>Your Room Summary</span>
         </p>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-          <GlassButton variant="amber" onClick={() => onSwitchRole('resident', 'res-aarav')}>
-            Resident (Aarav)
-          </GlassButton>
-          <GlassButton onClick={() => onSwitchRole('warden', 'war-kavita')}>
-            Warden (Kavita)
-          </GlassButton>
-          <GlassButton onClick={() => onSwitchRole('staff', 'stf-ramesh')}>
-            Staff (Ramesh)
-          </GlassButton>
-        </div>
+        <p className="text-xs text-[var(--text-secondary)]">
+          Showing {myTickets.length} complaint(s) filed under {user.name} / Room {user.room}. Sign out to enter as Warden or another student.
+        </p>
       </div>
     </GlassCard>
   );

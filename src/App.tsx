@@ -5,6 +5,8 @@ import {
   Building2,
   ChevronDown,
   Eye,
+  LogOut,
+  Settings,
   WifiOff,
 } from 'lucide-react';
 import type {
@@ -19,6 +21,7 @@ import type {
   TicketCategory,
   TicketPriority,
   TicketStatus,
+  User,
   UserRole,
 } from './types/domain';
 import {
@@ -44,18 +47,20 @@ import { StaffViews } from './components/views/StaffViews';
 import { SettingsSheet } from './components/modals/SettingsSheet';
 import { ExplainerTour } from './components/modals/ExplainerTour';
 import { JourneyReplayPanel } from './components/modals/JourneyReplayPanel';
+import { LandingLoginGate } from './components/modals/LandingLoginGate';
 
 export function App() {
   const [store, setStore] = useState<StoreSnapshot>(() => ticketRepository.load());
   const [role, setRole] = useState<UserRole>('resident');
-  const [activeUserId, setActiveUserId] = useState<string>('res-aarav');
+  const [activeUserId, setActiveUserId] = useState<string | null>(null);
+  const [landingExploring3D, setLandingExploring3D] = useState<boolean>(false);
   const [activeSegment, setActiveSegment] = useState<string>('home');
   const [activeBuilding, setActiveBuilding] = useState<BuildingId | null>(null);
   const [hoveredBuilding, setHoveredBuilding] = useState<BuildingId | null>(null);
   const [panelOpen, setPanelOpen] = useState<boolean>(true);
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
-  const [tourOpen, setTourOpen] = useState<boolean>(() => !ticketRepository.load().tourCompleted);
+  const [tourOpen, setTourOpen] = useState<boolean>(false);
   const [offlineSimulated, setOfflineSimulated] = useState<boolean>(false);
   const [typingActive, setTypingActive] = useState<boolean>(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -109,20 +114,22 @@ export function App() {
     }, 4400);
   }, []);
 
-  const currentUser = useMemo(
-    () => store.users.find((u) => u.id === activeUserId) ?? store.users.find((u) => u.role === role) ?? store.users[0],
-    [store.users, activeUserId, role]
+  const loggedInUser = useMemo(
+    () => (activeUserId ? store.users.find((u) => u.id === activeUserId) ?? null : null),
+    [store.users, activeUserId]
   );
+
+  const currentUser = loggedInUser ?? store.users[0];
 
   const overdueCount = useMemo(
     () => store.tickets.filter((tk) => isTicketOverdue(tk)).length,
     [store.tickets]
   );
 
-  const unreadAlertsCount = useMemo(
-    () => store.notifications.filter((n) => !n.readAt && (role === 'warden' || n.userId === currentUser.id)).length,
-    [store.notifications, role, currentUser.id]
-  );
+  const unreadAlertsCount = useMemo(() => {
+    if (!loggedInUser) return 0;
+    return store.notifications.filter((n) => !n.readAt && (role === 'warden' || n.userId === loggedInUser.id)).length;
+  }, [store.notifications, role, loggedInUser]);
 
   // Role-aware Bottom Dock segments (max 5)
   const dockSegments: DockSegment[] = useMemo(() => {
@@ -161,40 +168,98 @@ export function App() {
     setPanelOpen(true);
   }, []);
 
+  const handleLoginExisting = useCallback(
+    (user: User) => {
+      setRole(user.role);
+      setActiveUserId(user.id);
+      setLandingExploring3D(false);
+      setTourOpen(false);
+      if (user.role === 'resident') {
+        setActiveSegment('home');
+        setActiveBuilding('hostel_block');
+      } else if (user.role === 'warden') {
+        setActiveSegment('overview');
+        setActiveBuilding('wardens_office');
+      } else {
+        setActiveSegment('my_jobs');
+        setActiveBuilding('workshop');
+      }
+      setPanelOpen(true);
+      pushToast(`Signed in as ${user.name}`, t(store.settings.language, `role.${user.role}`), 'success');
+    },
+    [store.settings.language, pushToast]
+  );
+
+  const handleLoginCustomStudent = useCallback(
+    (payload: { name: string; block: HostelBlock; room: string }) => {
+      const existing = store.users.find(
+        (u) =>
+          u.role === 'resident' &&
+          u.name.toLowerCase() === payload.name.toLowerCase() &&
+          u.room?.toLowerCase() === payload.room.toLowerCase()
+      );
+      if (existing) {
+        handleLoginExisting(existing);
+        return;
+      }
+      const initials = payload.name
+        .split(/\s+/)
+        .slice(0, 2)
+        .map((p) => p[0]?.toUpperCase() ?? '')
+        .join('') || 'ST';
+      const newUser: User = {
+        id: `res-${Date.now().toString(36)}`,
+        name: payload.name,
+        role: 'resident',
+        block: payload.block,
+        room: payload.room,
+        avatarInitials: initials,
+      };
+      setStore((prev) => ({ ...prev, users: [...prev.users, newUser] }));
+      handleLoginExisting(newUser);
+    },
+    [store.users, handleLoginExisting]
+  );
+
+  const handleLogout = useCallback(() => {
+    setActiveUserId(null);
+    setSelectedTicketId(null);
+    setActiveBuilding(null);
+    setLandingExploring3D(false);
+    setPanelOpen(true);
+    pushToast('Signed out', 'Returned to 3D Main Gate');
+  }, [pushToast]);
+
   const handleSwitchRole = useCallback((nextRole: UserRole, userId?: string) => {
-    setRole(nextRole);
+    if (!userId && loggedInUser && nextRole === loggedInUser.role) {
+      handleLogout();
+      return;
+    }
     const matched = userId
       ? store.users.find((u) => u.id === userId)
       : store.users.find((u) => u.role === nextRole);
-    if (matched) setActiveUserId(matched.id);
-
-    if (nextRole === 'resident') {
-      setActiveSegment('home');
-      setActiveBuilding('hostel_block');
-    } else if (nextRole === 'warden') {
-      setActiveSegment('overview');
-      setActiveBuilding('wardens_office');
-    } else {
-      setActiveSegment('my_jobs');
-      setActiveBuilding('workshop');
-    }
-    setPanelOpen(true);
-    pushToast(`Switched to ${t(store.settings.language, `role.${nextRole}`)}`, matched?.name);
-  }, [store.users, store.settings.language, pushToast]);
+    if (matched) handleLoginExisting(matched);
+  }, [store.users, loggedInUser, handleLoginExisting, handleLogout]);
 
   const handleSelect3DBuilding = useCallback((id: BuildingId) => {
     setActiveBuilding(id);
+    if (!loggedInUser) {
+      setLandingExploring3D(false);
+      pushToast(BUILDINGS[id].name, `${BUILDINGS[id].subtitle} — sign in to open`);
+      return;
+    }
     setPanelOpen(true);
     if (id === 'hostel_block') {
       if (role === 'resident') setActiveSegment('new_ticket');
     } else if (id === 'notice_board') {
       setActiveSegment(role === 'resident' ? 'my_tickets' : role === 'warden' ? 'tickets' : 'my_jobs');
     } else if (id === 'wardens_office') {
-      if (role !== 'warden') handleSwitchRole('warden');
-      else setActiveSegment('overview');
+      if (role === 'warden') setActiveSegment('overview');
+      else pushToast("Warden's Office", 'Sign in as Warden to access dashboard');
     } else if (id === 'workshop') {
-      if (role !== 'staff') handleSwitchRole('staff');
-      else setActiveSegment('my_jobs');
+      if (role === 'staff') setActiveSegment('my_jobs');
+      else if (role === 'warden') setActiveSegment('staff');
+      else pushToast('Maintenance Workshop', 'Sign in as Staff to manage repair queue');
     } else if (id === 'utility_yard') {
       if (role === 'staff') setActiveSegment('updates');
     } else if (id === 'clock_tower') {
@@ -205,7 +270,7 @@ export function App() {
     } else if (id === 'main_gate') {
       setActiveSegment(role === 'resident' ? 'profile' : role === 'warden' ? 'reports' : 'my_jobs');
     }
-  }, [role, handleSwitchRole]);
+  }, [loggedInUser, role, pushToast]);
 
   const addNotification = (prev: StoreSnapshot, notif: Omit<AppNotification, 'id' | 'timestamp' | 'readAt'>): AppNotification[] => {
     return [
@@ -518,23 +583,28 @@ export function App() {
               </div>
             </div>
 
-            {/* Quick Role Switcher Pill */}
-            <div className="glass-lens-pill p-1 flex items-center gap-1">
-              {(['resident', 'warden', 'staff'] as UserRole[]).map((r) => (
+            {/* Signed-in User Badge + Logout OR Guest Landing Badge */}
+            {loggedInUser ? (
+              <div className="glass-lens-pill p-1 pl-3 flex items-center gap-2">
+                <span className="text-xs font-semibold text-[var(--text-primary)]">
+                  {loggedInUser.name}
+                  {loggedInUser.room ? ` · ${loggedInUser.room}` : ''}
+                </span>
                 <button
-                  key={r}
                   type="button"
-                  onClick={() => handleSwitchRole(r)}
-                  className={`px-2.5 sm:px-3 py-1 rounded-full text-xs font-medium transition-colors cursor-pointer ${
-                    role === r
-                      ? 'bg-[var(--accent-amber)] text-slate-950 font-semibold'
-                      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                  }`}
+                  onClick={handleLogout}
+                  aria-label="Sign out to Main Gate"
+                  className="px-2.5 py-1 rounded-full bg-[var(--accent-amber-soft)] text-[var(--accent-amber)] hover:bg-[var(--accent-amber)] hover:text-slate-950 text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer"
                 >
-                  {r === 'staff' ? 'Staff' : r[0].toUpperCase() + r.slice(1)}
+                  <LogOut className="w-3 h-3" />
+                  <span>Sign out</span>
                 </button>
-              ))}
-            </div>
+              </div>
+            ) : (
+              <div className="glass-lens-pill px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)]">
+                Main Gate · Sign in to continue
+              </div>
+            )}
 
             {overdueCount > 0 && (
               <button
@@ -548,7 +618,7 @@ export function App() {
             )}
           </div>
 
-          {/* Hovered Building Tooltip + Orb Stages + Explore Toggle */}
+          {/* Hovered Building Tooltip + Orb Stages + Explore/Settings Controls */}
           <div className="pointer-events-auto flex items-start gap-2 ml-auto">
             {hoveredBuilding && (
               <div className="glass-lens-pill px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] hidden sm:flex items-center gap-2">
@@ -560,20 +630,32 @@ export function App() {
             <JourneyReplayPanel
               activeStage={orbJourney?.stationIndex ?? 0}
               onReplayStage={(stageIndex, bld) => {
-                setPanelOpen(false);
+                if (loggedInUser) setPanelOpen(false);
+                else setLandingExploring3D(true);
                 animationController.emitStoryboardStage(stageIndex);
                 setActiveBuilding(bld);
               }}
             />
-            <button
-              type="button"
-              onClick={() => setPanelOpen((v) => !v)}
-              aria-label={panelOpen ? 'Minimize panel to explore 3D campus' : 'Open active glass panel'}
-              className="glass-lens-btn px-3.5 min-h-[40px] text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer"
-            >
-              {panelOpen ? <Eye className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5 rotate-180" />}
-              <span className="hidden sm:inline">{panelOpen ? 'Explore 3D' : 'Open Panel'}</span>
-            </button>
+            {loggedInUser ? (
+              <button
+                type="button"
+                onClick={() => setPanelOpen((v) => !v)}
+                aria-label={panelOpen ? 'Minimize panel to explore 3D campus' : 'Open active glass panel'}
+                className="glass-lens-btn px-3.5 min-h-[40px] text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                {panelOpen ? <Eye className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5 rotate-180" />}
+                <span className="hidden sm:inline">{panelOpen ? 'Explore 3D' : 'Open Panel'}</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                aria-label="Open theme and accessibility settings"
+                className="glass-lens-btn w-10 h-10 flex items-center justify-center cursor-pointer"
+              >
+                <Settings className="w-4 h-4 text-[var(--text-primary)]" />
+              </button>
+            )}
           </div>
         </header>
 
@@ -585,83 +667,97 @@ export function App() {
           </div>
         )}
 
-        {/* 4. Floating Glass Panel Above Dock */}
-        <AnimatePresence>
-          {panelOpen && (
-            <motion.main
-              key={`${role}-${activeSegment}`}
-              initial={{ opacity: 0, y: 36, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 36, scale: 0.96 }}
-              transition={{ type: 'spring', stiffness: 260, damping: 24 }}
-              className="flex-1 min-h-0 pt-2.5 pb-22 px-3 sm:px-6 flex justify-center pointer-events-none"
-            >
-              <div className="w-full max-w-4xl h-full overflow-y-auto glass-scroll pointer-events-auto pb-4 pr-1 select-text">
-                {role === 'resident' && (
-                  <ResidentViews
-                    activeSegment={activeSegment}
-                    user={currentUser}
-                    users={store.users}
-                    tickets={store.tickets}
-                    notifications={store.notifications}
-                    lang={store.settings.language}
-                    is2DMode={store.settings.force2DMode}
-                    onNavigate={(seg, bld) => {
-                      setActiveSegment(seg);
-                      setActiveBuilding(bld);
-                    }}
-                    onSubmitTicket={handleSubmitTicket}
-                    onOpenTicket={(tk) => setSelectedTicketId(tk.id)}
-                    onTrackTicket={(tk) => handleTrackTicket(tk)}
-                    onMarkNotifRead={(id) =>
-                      setStore((prev) => ({
-                        ...prev,
-                        notifications: prev.notifications.map((n) =>
-                          n.id === id ? { ...n, readAt: new Date().toISOString() } : n
-                        ),
-                      }))
-                    }
-                    onSwitchRole={handleSwitchRole}
-                    onTypingChange={setTypingActive}
-                  />
-                )}
+        {/* 4. Either 3D Landing + Student/Warden Login Gate OR Logged-in Role Panel */}
+        {!loggedInUser ? (
+          <LandingLoginGate
+            users={store.users}
+            exploring3D={landingExploring3D}
+            onToggleExplore3D={() => setLandingExploring3D((v) => !v)}
+            onReplayTour={() => {
+              setLandingExploring3D(true);
+              setTourOpen(true);
+            }}
+            onLoginExisting={handleLoginExisting}
+            onLoginCustomStudent={handleLoginCustomStudent}
+          />
+        ) : (
+          <AnimatePresence>
+            {panelOpen && (
+              <motion.main
+                key={`${role}-${activeSegment}`}
+                initial={{ opacity: 0, y: 36, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 36, scale: 0.96 }}
+                transition={{ type: 'spring', stiffness: 260, damping: 24 }}
+                className="flex-1 min-h-0 pt-2.5 pb-22 px-3 sm:px-6 flex justify-center pointer-events-none"
+              >
+                <div className="w-full max-w-4xl h-full overflow-y-auto glass-scroll pointer-events-auto pb-4 pr-1 select-text">
+                  {role === 'resident' && (
+                    <ResidentViews
+                      activeSegment={activeSegment}
+                      user={currentUser}
+                      users={store.users}
+                      tickets={store.tickets}
+                      notifications={store.notifications}
+                      lang={store.settings.language}
+                      is2DMode={store.settings.force2DMode}
+                      onNavigate={(seg, bld) => {
+                        setActiveSegment(seg);
+                        setActiveBuilding(bld);
+                      }}
+                      onSubmitTicket={handleSubmitTicket}
+                      onOpenTicket={(tk) => setSelectedTicketId(tk.id)}
+                      onTrackTicket={(tk) => handleTrackTicket(tk)}
+                      onMarkNotifRead={(id) =>
+                        setStore((prev) => ({
+                          ...prev,
+                          notifications: prev.notifications.map((n) =>
+                            n.id === id ? { ...n, readAt: new Date().toISOString() } : n
+                          ),
+                        }))
+                      }
+                      onSwitchRole={handleSwitchRole}
+                      onTypingChange={setTypingActive}
+                    />
+                  )}
 
-                {role === 'warden' && (
-                  <WardenViews
-                    activeSegment={activeSegment}
-                    users={store.users}
-                    tickets={store.tickets}
-                    slaHours={store.settings.slaHours}
-                    lang={store.settings.language}
-                    onAssignTicket={handleAssignTicket}
-                    onBulkAssign={handleBulkAssign}
-                    onUpdateSla={handleUpdateSla}
-                    onOpenTicket={(tk) => setSelectedTicketId(tk.id)}
-                    onTrackTicket={(tk) => handleTrackTicket(tk)}
-                    onSwitchRole={handleSwitchRole}
-                  />
-                )}
+                  {role === 'warden' && (
+                    <WardenViews
+                      activeSegment={activeSegment}
+                      users={store.users}
+                      tickets={store.tickets}
+                      slaHours={store.settings.slaHours}
+                      lang={store.settings.language}
+                      onAssignTicket={handleAssignTicket}
+                      onBulkAssign={handleBulkAssign}
+                      onUpdateSla={handleUpdateSla}
+                      onOpenTicket={(tk) => setSelectedTicketId(tk.id)}
+                      onTrackTicket={(tk) => handleTrackTicket(tk)}
+                      onSwitchRole={handleSwitchRole}
+                    />
+                  )}
 
-                {role === 'staff' && (
-                  <StaffViews
-                    activeSegment={activeSegment}
-                    staff={currentUser}
-                    tickets={store.tickets}
-                    lang={store.settings.language}
-                    onPostStatusUpdate={handlePostStatusUpdate}
-                    onOpenTicket={(tk) => setSelectedTicketId(tk.id)}
-                    onTrackTicket={(tk) => handleTrackTicket(tk)}
-                    onSwitchRole={handleSwitchRole}
-                  />
-                )}
-              </div>
-            </motion.main>
-          )}
-        </AnimatePresence>
+                  {role === 'staff' && (
+                    <StaffViews
+                      activeSegment={activeSegment}
+                      staff={currentUser}
+                      tickets={store.tickets}
+                      lang={store.settings.language}
+                      onPostStatusUpdate={handlePostStatusUpdate}
+                      onOpenTicket={(tk) => setSelectedTicketId(tk.id)}
+                      onTrackTicket={(tk) => handleTrackTicket(tk)}
+                      onSwitchRole={handleSwitchRole}
+                    />
+                  )}
+                </div>
+              </motion.main>
+            )}
+          </AnimatePresence>
+        )}
       </div>
 
       {/* Live Orb Journey Caption Pill when exploring 3D */}
-      {!panelOpen && orbJourney && (
+      {((loggedInUser && !panelOpen) || (!loggedInUser && landingExploring3D)) && orbJourney && (
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-20 glass-lens-pill px-4 py-2 text-xs text-[var(--text-primary)] max-w-[90vw] truncate">
           <span className="font-mono-code font-bold text-[var(--accent-amber)] mr-2">
             {orbJourney.ticketId}
@@ -670,22 +766,24 @@ export function App() {
         </div>
       )}
 
-      {/* 5. Role-Aware Bottom Toggle Dock */}
-      <BottomDock
-        role={role}
-        segments={dockSegments}
-        activeSegment={activeSegment}
-        onSelect={handleSelectSegment}
-        onOpenSettings={() => setSettingsOpen(true)}
-        theme={store.settings.theme}
-        onToggleTheme={() =>
-          handleUpdateSettings({
-            theme: store.settings.theme === 'obsidian' ? 'frost' : 'obsidian',
-          })
-        }
-        lang={store.settings.language}
-        typingActive={typingActive}
-      />
+      {/* 5. Role-Aware Bottom Toggle Dock (shown once signed in) */}
+      {loggedInUser && (
+        <BottomDock
+          role={role}
+          segments={dockSegments}
+          activeSegment={activeSegment}
+          onSelect={handleSelectSegment}
+          onOpenSettings={() => setSettingsOpen(true)}
+          theme={store.settings.theme}
+          onToggleTheme={() =>
+            handleUpdateSettings({
+              theme: store.settings.theme === 'obsidian' ? 'frost' : 'obsidian',
+            })
+          }
+          lang={store.settings.language}
+          typingActive={typingActive}
+        />
+      )}
 
       {/* 6. Modals, Toasts, Explainer Tour & Stage Replay */}
       <GlassToast
@@ -715,7 +813,8 @@ export function App() {
         onUpdateSettings={handleUpdateSettings}
         onToggleOffline={handleToggleOffline}
         onReplayTour={() => {
-          setPanelOpen(false);
+          if (loggedInUser) setPanelOpen(false);
+          else setLandingExploring3D(true);
           setTourOpen(true);
         }}
         onResetDemo={() => {
