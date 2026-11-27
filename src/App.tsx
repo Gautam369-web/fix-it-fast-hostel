@@ -62,12 +62,45 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [tourOpen, setTourOpen] = useState<boolean>(false);
   const [offlineSimulated, setOfflineSimulated] = useState<boolean>(false);
+  const [dbConnected, setDbConnected] = useState<boolean>(false);
   const [typingActive, setTypingActive] = useState<boolean>(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [orbJourney, setOrbJourney] = useState<OrbJourneyState | null>(null);
   const [reducedMotionPref, setReducedMotionPref] = useState<boolean>(() =>
     typeof window !== 'undefined' ? window.matchMedia('(prefers-reduced-motion: reduce)').matches : false
   );
+
+  // Sync helper to merge remote Neon Postgres state into React state + local cache
+  const applyRemoteSnapshot = useCallback((remote?: Partial<StoreSnapshot>) => {
+    if (!remote) return;
+    setStore((prev) => ({
+      ...prev,
+      users: remote.users ?? prev.users,
+      tickets: remote.tickets ?? prev.tickets,
+      timeline: remote.timeline ?? prev.timeline,
+      notifications: remote.notifications ?? prev.notifications,
+    }));
+  }, []);
+
+  // Load initial remote Neon database snapshot when /api/store is live
+  useEffect(() => {
+    let active = true;
+    const syncNow = async () => {
+      if (offlineSimulated) return;
+      const res = await ticketRepository.fetchRemote();
+      if (!active) return;
+      setDbConnected(res.connected);
+      if (res.connected && res.snapshot) {
+        applyRemoteSnapshot(res.snapshot);
+      }
+    };
+    syncNow();
+    const timer = window.setInterval(syncNow, 15000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [offlineSimulated, applyRemoteSnapshot]);
 
   // Persist store changes
   useEffect(() => {
@@ -216,9 +249,14 @@ export function App() {
         avatarInitials: initials,
       };
       setStore((prev) => ({ ...prev, users: [...prev.users, newUser] }));
+      if (!offlineSimulated) {
+        void ticketRepository.mutateRemote('registerStudent', { user: newUser }).then((res) => {
+          if (res.connected) applyRemoteSnapshot(res.snapshot);
+        });
+      }
       handleLoginExisting(newUser);
     },
-    [store.users, handleLoginExisting]
+    [store.users, offlineSimulated, applyRemoteSnapshot, handleLoginExisting]
   );
 
   const handleLogout = useCallback(() => {
@@ -321,18 +359,31 @@ export function App() {
       photo: payload.photos[0],
     });
 
+    const notificationObj: AppNotification = {
+      id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+      userId: 'war-kavita',
+      ticketId: id,
+      type: 'submitted',
+      title: `New ${payload.priority} ${payload.category} ticket (${id})`,
+      body: `Room ${ticket.room} (${ticket.block}): ${ticket.description}`,
+      timestamp: new Date().toISOString(),
+      readAt: null,
+    };
+
     setStore((prev) => ({
       ...prev,
       tickets: [ticket, ...prev.tickets],
       timeline: [...prev.timeline, ev],
-      notifications: addNotification(prev, {
-        userId: 'war-kavita',
-        ticketId: id,
-        type: 'submitted',
-        title: `New ${payload.priority} ${payload.category} ticket (${id})`,
-        body: `Room ${ticket.room} (${ticket.block}): ${ticket.description}`,
-      }),
+      notifications: [notificationObj, ...prev.notifications],
     }));
+
+    if (!offlineSimulated) {
+      void ticketRepository
+        .mutateRemote('createTicket', { ticket, event: ev, notification: notificationObj })
+        .then((res) => {
+          if (res.connected) applyRemoteSnapshot(res.snapshot);
+        });
+    }
 
     animationController.emitTicketJourney(ticket, false);
     pushToast(
@@ -347,6 +398,23 @@ export function App() {
     const staffUser = store.users.find((u) => u.id === staffId);
     if (!staffUser) return;
     let updatedTicket: Ticket | null = null;
+    const ev = makeTimelineEntry({
+      ticketId,
+      actor: currentUser,
+      status: 'Assigned',
+      note: `Assigned to ${staffUser.name} (${staffUser.skills?.join(', ')}).`,
+    });
+    const existingTarget = store.tickets.find((tk) => tk.id === ticketId);
+    const notifObj: AppNotification = {
+      id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+      userId: existingTarget?.residentId ?? 'res-aarav',
+      ticketId,
+      type: 'assigned',
+      title: `${ticketId} assigned to ${staffUser.name}`,
+      body: 'Maintenance staff has received your complaint orb.',
+      timestamp: new Date().toISOString(),
+      readAt: null,
+    };
 
     setStore((prev) => {
       const nextTickets = prev.tickets.map((tk) => {
@@ -354,25 +422,21 @@ export function App() {
         updatedTicket = { ...tk, assignedTo: staffId, status: 'Assigned' };
         return updatedTicket;
       });
-      const ev = makeTimelineEntry({
-        ticketId,
-        actor: currentUser,
-        status: 'Assigned',
-        note: `Assigned to ${staffUser.name} (${staffUser.skills?.join(', ')}).`,
-      });
       return {
         ...prev,
         tickets: nextTickets,
         timeline: [...prev.timeline, ev],
-        notifications: addNotification(prev, {
-          userId: updatedTicket?.residentId ?? 'res-aarav',
-          ticketId,
-          type: 'assigned',
-          title: `${ticketId} assigned to ${staffUser.name}`,
-          body: 'Maintenance staff has received your complaint orb.',
-        }),
+        notifications: [notifObj, ...prev.notifications],
       };
     });
+
+    if (!offlineSimulated) {
+      void ticketRepository
+        .mutateRemote('assignTicket', { ticketId, staffId, event: ev, notification: notifObj })
+        .then((res) => {
+          if (res.connected) applyRemoteSnapshot(res.snapshot);
+        });
+    }
 
     if (updatedTicket) {
       animationController.emitTicketJourney(updatedTicket, isTicketOverdue(updatedTicket));
@@ -387,32 +451,46 @@ export function App() {
 
   const handlePostStatusUpdate = (ticketId: string, status: TicketStatus, note: string, photo?: string) => {
     let updatedTicket: Ticket | null = null;
+    const ev = makeTimelineEntry({
+      ticketId,
+      actor: currentUser,
+      status,
+      note,
+      photo,
+    });
+    const existingTarget = store.tickets.find((tk) => tk.id === ticketId);
+    const notifObj: AppNotification = {
+      id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+      userId: existingTarget?.residentId ?? 'res-aarav',
+      ticketId,
+      type: status === 'Resolved' ? 'resolved' : status === 'Waiting for parts' ? 'waiting_parts' : 'in_progress',
+      title: `${ticketId} is now ${status}`,
+      body: note,
+      timestamp: new Date().toISOString(),
+      readAt: null,
+    };
+
     setStore((prev) => {
       const nextTickets = prev.tickets.map((tk) => {
         if (tk.id !== ticketId) return tk;
         updatedTicket = { ...tk, status };
         return updatedTicket;
       });
-      const ev = makeTimelineEntry({
-        ticketId,
-        actor: currentUser,
-        status,
-        note,
-        photo,
-      });
       return {
         ...prev,
         tickets: nextTickets,
         timeline: [...prev.timeline, ev],
-        notifications: addNotification(prev, {
-          userId: updatedTicket?.residentId ?? 'res-aarav',
-          ticketId,
-          type: status === 'Resolved' ? 'resolved' : status === 'Waiting for parts' ? 'waiting_parts' : 'in_progress',
-          title: `${ticketId} is now ${status}`,
-          body: note,
-        }),
+        notifications: [notifObj, ...prev.notifications],
       };
     });
+
+    if (!offlineSimulated) {
+      void ticketRepository
+        .mutateRemote('postStatusUpdate', { ticketId, status, event: ev, notification: notifObj })
+        .then((res) => {
+          if (res.connected) applyRemoteSnapshot(res.snapshot);
+        });
+    }
 
     if (updatedTicket) {
       animationController.emitTicketJourney(updatedTicket, isTicketOverdue(updatedTicket));
@@ -426,19 +504,24 @@ export function App() {
 
   const handleConfirmAndRate = (ticket: Ticket, rating: number, comment: string) => {
     const updated: Ticket = { ...ticket, status: 'Closed', rating, ratingComment: comment };
+    const ev = makeTimelineEntry({
+      ticketId: ticket.id,
+      actor: currentUser,
+      status: 'Closed',
+      note: `Confirmed resolved and rated ${rating}/5 stars.${comment ? ` “${comment}”` : ''}`,
+    });
     setStore((prev) => ({
       ...prev,
       tickets: prev.tickets.map((tk) => (tk.id === ticket.id ? updated : tk)),
-      timeline: [
-        ...prev.timeline,
-        makeTimelineEntry({
-          ticketId: ticket.id,
-          actor: currentUser,
-          status: 'Closed',
-          note: `Confirmed resolved and rated ${rating}/5 stars.${comment ? ` “${comment}”` : ''}`,
-        }),
-      ],
+      timeline: [...prev.timeline, ev],
     }));
+    if (!offlineSimulated) {
+      void ticketRepository
+        .mutateRemote('confirmAndRate', { ticketId: ticket.id, rating, ratingComment: comment, event: ev })
+        .then((res) => {
+          if (res.connected) applyRemoteSnapshot(res.snapshot);
+        });
+    }
     animationController.emitTicketJourney(updated, false);
     setActiveBuilding('feedback_gazebo');
     setSelectedTicketId(null);
@@ -451,27 +534,36 @@ export function App() {
       status: 'Reopened',
       reopenCount: ticket.reopenCount + 1,
     };
+    const ev = makeTimelineEntry({
+      ticketId: ticket.id,
+      actor: currentUser,
+      status: 'Reopened',
+      note: reason,
+      photo,
+    });
+    const notifObj: AppNotification = {
+      id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+      userId: 'war-kavita',
+      ticketId: ticket.id,
+      type: 'reopened',
+      title: `${ticket.id} reopened by resident`,
+      body: reason,
+      timestamp: new Date().toISOString(),
+      readAt: null,
+    };
     setStore((prev) => ({
       ...prev,
       tickets: prev.tickets.map((tk) => (tk.id === ticket.id ? updated : tk)),
-      timeline: [
-        ...prev.timeline,
-        makeTimelineEntry({
-          ticketId: ticket.id,
-          actor: currentUser,
-          status: 'Reopened',
-          note: reason,
-          photo,
-        }),
-      ],
-      notifications: addNotification(prev, {
-        userId: 'war-kavita',
-        ticketId: ticket.id,
-        type: 'reopened',
-        title: `${ticket.id} reopened by resident`,
-        body: reason,
-      }),
+      timeline: [...prev.timeline, ev],
+      notifications: [notifObj, ...prev.notifications],
     }));
+    if (!offlineSimulated) {
+      void ticketRepository
+        .mutateRemote('reopenTicket', { ticketId: ticket.id, event: ev, notification: notifObj })
+        .then((res) => {
+          if (res.connected) applyRemoteSnapshot(res.snapshot);
+        });
+    }
     animationController.emitTicketJourney(updated, isTicketOverdue(updated));
     setActiveBuilding('wardens_office');
     pushToast(`${ticket.id} reopened`, "Returned to Warden's Office", 'warning');
@@ -479,17 +571,28 @@ export function App() {
 
   const handleNudgeWarden = (ticket: Ticket) => {
     const nowIso = new Date().toISOString();
+    const notifObj: AppNotification = {
+      id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+      userId: 'war-kavita',
+      ticketId: ticket.id,
+      type: 'nudged',
+      title: `Resident nudged on overdue ${ticket.id}`,
+      body: `Room ${ticket.room} is waiting for action.`,
+      timestamp: nowIso,
+      readAt: null,
+    };
     setStore((prev) => ({
       ...prev,
       tickets: prev.tickets.map((tk) => (tk.id === ticket.id ? { ...tk, nudgedAt: nowIso } : tk)),
-      notifications: addNotification(prev, {
-        userId: 'war-kavita',
-        ticketId: ticket.id,
-        type: 'nudged',
-        title: `Resident nudged on overdue ${ticket.id}`,
-        body: `Room ${ticket.room} is waiting for action.`,
-      }),
+      notifications: [notifObj, ...prev.notifications],
     }));
+    if (!offlineSimulated) {
+      void ticketRepository
+        .mutateRemote('nudgeWarden', { ticketId: ticket.id, nudgedAt: nowIso, notification: notifObj })
+        .then((res) => {
+          if (res.connected) applyRemoteSnapshot(res.snapshot);
+        });
+    }
     playSoftChime('overdue', store.settings.soundEnabled);
     pushToast('Warden nudged', `${ticket.id} highlighted at Clock Tower`, 'warning');
   };
@@ -627,6 +730,15 @@ export function App() {
                 <span className="text-[var(--text-muted)]">· {BUILDINGS[hoveredBuilding].subtitle}</span>
               </div>
             )}
+            {dbConnected && !offlineSimulated && (
+              <span
+                title="Connected to Neon Postgres"
+                className="glass-lens-pill px-2.5 py-1 text-[11px] font-medium text-[var(--text-primary)] hidden md:inline-flex items-center gap-1.5"
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                Neon DB
+              </span>
+            )}
             <JourneyReplayPanel
               activeStage={orbJourney?.stationIndex ?? 0}
               onReplayStage={(stageIndex, bld) => {
@@ -708,14 +820,18 @@ export function App() {
                       onSubmitTicket={handleSubmitTicket}
                       onOpenTicket={(tk) => setSelectedTicketId(tk.id)}
                       onTrackTicket={(tk) => handleTrackTicket(tk)}
-                      onMarkNotifRead={(id) =>
+                      onMarkNotifRead={(id) => {
+                        const readAt = new Date().toISOString();
                         setStore((prev) => ({
                           ...prev,
                           notifications: prev.notifications.map((n) =>
-                            n.id === id ? { ...n, readAt: new Date().toISOString() } : n
+                            n.id === id ? { ...n, readAt } : n
                           ),
-                        }))
-                      }
+                        }));
+                        if (!offlineSimulated) {
+                          void ticketRepository.mutateRemote('markNotifRead', { id, readAt });
+                        }
+                      }}
                       onSwitchRole={handleSwitchRole}
                       onTypingChange={setTypingActive}
                     />
@@ -820,6 +936,11 @@ export function App() {
         onResetDemo={() => {
           const fresh = ticketRepository.reset();
           setStore(fresh);
+          if (!offlineSimulated) {
+            void ticketRepository.mutateRemote('resetDemo', {}).then((res) => {
+              if (res.connected) applyRemoteSnapshot(res.snapshot);
+            });
+          }
           pushToast('Demo data restored', 'All sample tickets & timeline reset');
         }}
       />

@@ -7,11 +7,9 @@ import {
 
 export type StorageMode = 'local' | 'api' | 'supabase';
 
-export interface TicketRepository {
-  mode: StorageMode;
-  load: () => StoreSnapshot;
-  save: (snapshot: StoreSnapshot) => void;
-  reset: () => StoreSnapshot;
+export interface RemoteSyncResult {
+  connected: boolean;
+  snapshot?: Partial<StoreSnapshot>;
 }
 
 export function getStorageMode(): StorageMode {
@@ -20,15 +18,47 @@ export function getStorageMode(): StorageMode {
   return 'local';
 }
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
+
 /**
- * Default repository backed by localStorage + seed data so Vercel deployments
- * run immediately with zero external database setup. When connecting Postgres,
- * Neon, or Supabase later, implement async fetch/sync hooks here without
- * changing UI components.
+ * Repository bridging localStorage cache (instant UI + offline fallback)
+ * and the Vercel `/api/store` Neon Serverless Postgres backend.
  */
-export const ticketRepository: TicketRepository = {
+export const ticketRepository = {
   mode: getStorageMode(),
-  load: () => loadStore(),
-  save: (snapshot) => saveStore(snapshot),
-  reset: () => resetStore(),
+  load: (): StoreSnapshot => loadStore(),
+  save: (snapshot: StoreSnapshot): void => saveStore(snapshot),
+  reset: (): StoreSnapshot => resetStore(),
+
+  async fetchRemote(): Promise<RemoteSyncResult> {
+    try {
+      const res = await fetch(`${API_BASE}/store`, { method: 'GET' });
+      if (!res.ok) return { connected: false };
+      const data = await res.json();
+      if (data?.ok && data?.mode === 'database' && data?.snapshot) {
+        return { connected: true, snapshot: data.snapshot };
+      }
+      return { connected: false };
+    } catch {
+      return { connected: false };
+    }
+  },
+
+  async mutateRemote(action: string, payload: Record<string, unknown>): Promise<RemoteSyncResult> {
+    try {
+      const res = await fetch(`${API_BASE}/store`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, payload }),
+      });
+      if (!res.ok) return { connected: false };
+      const data = await res.json();
+      if (data?.ok && data?.mode === 'database' && data?.snapshot) {
+        return { connected: true, snapshot: data.snapshot };
+      }
+      return { connected: false };
+    } catch {
+      return { connected: false };
+    }
+  },
 };
