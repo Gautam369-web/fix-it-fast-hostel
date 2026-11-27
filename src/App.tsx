@@ -24,13 +24,11 @@ import type {
 import {
   computeDueAt,
   isTicketOverdue,
-  loadStore,
   makeTimelineEntry,
   nextTicketId,
-  resetStore,
-  saveStore,
   type StoreSnapshot,
 } from './data/mockApi';
+import { ticketRepository } from './services/ticketRepository';
 import { animationController } from './controllers/AnimationController';
 import { playSoftChime } from './utils/chime';
 import { t } from './i18n/translations';
@@ -48,7 +46,7 @@ import { ExplainerTour } from './components/modals/ExplainerTour';
 import { JourneyReplayPanel } from './components/modals/JourneyReplayPanel';
 
 export function App() {
-  const [store, setStore] = useState<StoreSnapshot>(() => loadStore());
+  const [store, setStore] = useState<StoreSnapshot>(() => ticketRepository.load());
   const [role, setRole] = useState<UserRole>('resident');
   const [activeUserId, setActiveUserId] = useState<string>('res-aarav');
   const [activeSegment, setActiveSegment] = useState<string>('home');
@@ -57,7 +55,7 @@ export function App() {
   const [panelOpen, setPanelOpen] = useState<boolean>(true);
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
-  const [tourOpen, setTourOpen] = useState<boolean>(() => !loadStore().tourCompleted);
+  const [tourOpen, setTourOpen] = useState<boolean>(() => !ticketRepository.load().tourCompleted);
   const [offlineSimulated, setOfflineSimulated] = useState<boolean>(false);
   const [typingActive, setTypingActive] = useState<boolean>(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -68,7 +66,7 @@ export function App() {
 
   // Persist store changes
   useEffect(() => {
-    saveStore(store);
+    ticketRepository.save(store);
   }, [store]);
 
   // Apply root theme, text-size, high-contrast & reduced-transparency attributes
@@ -721,7 +719,7 @@ export function App() {
           setTourOpen(true);
         }}
         onResetDemo={() => {
-          const fresh = resetStore();
+          const fresh = ticketRepository.reset();
           setStore(fresh);
           pushToast('Demo data restored', 'All sample tickets & timeline reset');
         }}
