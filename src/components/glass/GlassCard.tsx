@@ -1,5 +1,4 @@
 import React from 'react';
-import { motion } from 'framer-motion';
 
 export interface GlassCardProps {
   children: React.ReactNode;
@@ -24,7 +23,7 @@ export const GlassCard: React.FC<GlassCardProps> = ({
 
   if (onClick) {
     return (
-      <motion.div
+      <div
         role="button"
         tabIndex={0}
         aria-label={ariaLabel}
@@ -35,11 +34,10 @@ export const GlassCard: React.FC<GlassCardProps> = ({
             onClick();
           }
         }}
-        whileTap={{ scale: 0.985 }}
-        className={baseCls}
+        className={`${baseCls} active:scale-[0.99]`}
       >
         {children}
-      </motion.div>
+      </div>
     );
   }
 
